@@ -1,17 +1,24 @@
-"""Simple keyword rules. In Part 05 an AI model takes over this decision."""
-from app.models import Category, Team, TriageResult
+"""The AI decides. The contract checks. Anything wrong goes to Human Review."""
+import httpx
+from pydantic import ValidationError
+
+from app.ai_client import ask_ai
+from app.models import Category, Team, TriageResponse, TriageResult
+
+HUMAN_REVIEW = dict(category=Category.unknown, priority=2, team=Team.human_review)
 
 
-def rule_based_triage(complaint: str) -> TriageResult:
-    text = complaint.lower()
+async def ai_triage(complaint: str) -> TriageResponse:
+    try:
+        raw_answer = await ask_ai(complaint)
+    except httpx.TimeoutException:
+        return TriageResponse(**HUMAN_REVIEW, decided_by="fallback: AI timed out")
+    except httpx.HTTPError:
+        return TriageResponse(**HUMAN_REVIEW, decided_by="fallback: AI unavailable")
 
-    if "charged" in text or "payment" in text or "upi" in text:
-        return TriageResult(category=Category.payments, priority=4, team=Team.payments)
-    if "refund" in text:
-        return TriageResult(category=Category.refund, priority=3, team=Team.refunds)
-    if "late" in text or "delivery" in text or "rider" in text:
-        return TriageResult(category=Category.delivery, priority=3, team=Team.delivery_ops)
-    if "cold" in text or "missing" in text or "restaurant" in text:
-        return TriageResult(category=Category.restaurant, priority=2, team=Team.restaurant_support)
+    try:
+        result = TriageResult.model_validate(raw_answer)
+    except ValidationError:
+        return TriageResponse(**HUMAN_REVIEW, decided_by="fallback: invalid AI answer")
 
-    return TriageResult(category=Category.unknown, priority=2, team=Team.human_review)
+    return TriageResponse(**result.model_dump(), decided_by="ai")

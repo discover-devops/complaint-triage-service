@@ -35,3 +35,8 @@ class TriageResult(BaseModel):
     category: Category
     priority: int = Field(ge=1, le=4)
     team: Team
+
+
+class TriageResponse(TriageResult):
+    """What the Zomato app receives: the result, plus who decided it."""
+    decided_by: str
